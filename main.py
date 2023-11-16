@@ -2,52 +2,24 @@ import os
 import yaml
 import logging
 import json
+import time
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-
 def process_labels(labels):
-    relevant_labels = {}
-    if isinstance(labels, dict):
-        for key, value in labels.items():
-            if key in ['pihole.dns', 'pihole.hostip']:
-                relevant_labels[key] = value
-    elif isinstance(labels, list):
-        for label in labels:
-            if isinstance(label, dict):
-                for key, value in label.items():
-                    if key in ['pihole.dns', 'pihole.hostip']:
-                        relevant_labels[key] = value
-            elif '=' in label:
-                key, value = label.split('=', 1)
-                if key in ['pihole.dns', 'pihole.hostip']:
-                    relevant_labels[key] = value
-    return relevant_labels
+    return {key: value for key, value in (labels.items() if isinstance(labels, dict) else 
+            (item.split('=', 1) for item in labels if '=' in item)) if key in ['pihole.dns', 'pihole.hostip']}
 
 def read_docker_compose_labels(file_path):
     try:
         with open(file_path, 'r') as file:
             compose_data = yaml.safe_load(file)
-            container_labels = {}
-            for service_name, service in compose_data['services'].items():
-                labels = service.get('labels', {})
-                processed_labels = process_labels(labels)
-                if processed_labels:
-                    container_labels[service_name] = processed_labels
-            logging.info(f"Successfully read labels from {file_path}")
-            return container_labels
+            return {service_name: process_labels(service.get('labels', {}))
+                    for service_name, service in compose_data['services'].items()}
     except Exception as e:
         logging.error(f"Error reading Docker Compose file: {e}")
         return {}
-
-def update_intermediary_file(intermediary_path, data):
-    try:
-        with open(intermediary_path, 'w') as file:
-            json.dump(data, file)
-        logging.info(f"Updated intermediary file {intermediary_path}")
-    except Exception as e:
-        logging.error(f"Error updating intermediary file: {e}")
 
 def read_intermediary_file(intermediary_path):
     try:
@@ -59,72 +31,84 @@ def read_intermediary_file(intermediary_path):
         logging.error(f"Error reading intermediary file: {e}")
         return {}
 
-def update_output_file(output_path, intermediary_data):
+def update_intermediary_file(intermediary_path, current_data, previous_data):
+    updated = False
+    for container, labels in current_data.items():
+        new_pair = f"{labels.get('pihole.hostip', 'unknown')} {labels.get('pihole.dns', 'unknown')}"
+        old_pair = previous_data.get(container, {}).get('pair', 'unknown unknown')
+        if new_pair != old_pair:
+            previous_data[container] = {'pair': new_pair, 'old_pair': old_pair}
+            updated = True
+
+    if updated:
+        try:
+            with open(intermediary_path, 'w') as file:
+                json.dump(previous_data, file)
+            logging.info(f"Updated intermediary file {intermediary_path}")
+        except Exception as e:
+            logging.error(f"Error updating intermediary file: {e}")
+
+def update_output_file(output_path, intermediary_path):
     try:
-        # Create a mapping from existing hostip-dns pairs to container names
-        existing_pairs_to_container = {f"{labels.get('pihole.hostip', 'unknown')} {labels.get('pihole.dns', 'unknown')}": container
-                                       for container, labels in intermediary_data.items()}
-
-        # Read existing file and prepare to update lines
+        with open(intermediary_path, 'r') as file:
+            intermediary_data = json.load(file)
         with open(output_path, 'r') as file:
-            existing_lines = file.readlines()
+            existing_lines = set(file.read().splitlines())
 
-        # Create a set for updated content and a set to track which containers have been updated
-        updated_content = set()
-        updated_containers = set()
+        new_pairs = {data.get('pair') for data in intermediary_data.values() if data.get('pair')}
+        
+        for container, data in intermediary_data.items():
+            old_pair = data.get('old_pair')
+            if old_pair and old_pair in existing_lines and old_pair != data.get('pair'):
+                existing_lines.remove(old_pair)
+                logging.info(f"Removed old pair for container {container}: {old_pair}")
 
-        # Update existing lines with new hostip-dns values
-        for line in existing_lines:
-            line_clean = line.strip()
-            if line_clean in existing_pairs_to_container:
-                container = existing_pairs_to_container[line_clean]
-                new_pair = f"{intermediary_data[container].get('pihole.hostip', 'unknown')} {intermediary_data[container].get('pihole.dns', 'unknown')}"
-                updated_content.add(new_pair)
-                updated_containers.add(container)
-            else:
-                updated_content.add(line_clean)
+        updated_lines = existing_lines.union(new_pairs)
 
-        # Add new hostip-dns pairs for containers not in the updated list
-        for container, labels in intermediary_data.items():
-            if container not in updated_containers:
-                new_pair = f"{labels.get('pihole.hostip', 'unknown')} {labels.get('pihole.dns', 'unknown')}"
-                updated_content.add(new_pair)
-
-        # Write updated content
         with open(output_path, 'w') as file:
-            for line in sorted(updated_content):
+            for line in sorted(updated_lines):
                 file.write(f"{line}\n")
 
         logging.info(f"Successfully updated {output_path}")
     except FileNotFoundError:
-        # Create file if it doesn't exist and write new pairs
         with open(output_path, 'w') as file:
-            for container, labels in intermediary_data.items():
-                pair = f"{labels.get('pihole.hostip', 'unknown')} {labels.get('pihole.dns', 'unknown')}"
+            for pair in new_pairs:
                 file.write(f"{pair}\n")
-        logging.info(f"Created and updated {output_path}")
+        logging.info(f"Created and populated new {output_path}")
     except Exception as e:
         logging.error(f"Error updating file: {e}")
 
-# ... rest of the script remains the same
-
-
-
+def watch_for_changes(filename, interval=5):
+    last_modified = None
+    while True:
+        try:
+            # Check last modified time
+            current_modified = os.path.getmtime(filename)
+            if last_modified is None or current_modified > last_modified:
+                last_modified = current_modified
+                yield True
+            else:
+                yield False
+        except FileNotFoundError:
+            logging.error(f"File {filename} not found.")
+            yield False
+        time.sleep(interval)
 
 def main():
     compose_file = '/compose/docker-compose.yml'
     output_file = '/output/your-output-file.txt'
     intermediary_file = '/output/intermediary.json'
 
-    current_labels = read_docker_compose_labels(compose_file)
-    previous_labels = read_intermediary_file(intermediary_file)
+    for file_changed in watch_for_changes(compose_file):
+        if file_changed:
+            logging.info(f"{compose_file} has changed, processing...")
+            current_labels = read_docker_compose_labels(compose_file)
+            previous_labels = read_intermediary_file(intermediary_file)
 
-    # Update intermediary file if labels have changed
-    if current_labels != previous_labels:
-        update_intermediary_file(intermediary_file, current_labels)
-        update_output_file(output_file, current_labels)
-    else:
-        logging.info("No changes in labels detected.")
+            update_intermediary_file(intermediary_file, current_labels, previous_labels)
+            update_output_file(output_file, intermediary_file)
+
+            logging.info("Processing completed.")
 
 if __name__ == "__main__":
     main()
