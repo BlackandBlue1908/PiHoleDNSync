@@ -10,17 +10,17 @@ def process_labels(labels):
     if isinstance(labels, dict):
         for key, value in labels.items():
             if key.startswith('piholedns'):
-                relevant_labels.append({key: value})
+                relevant_labels.append((key, value))
     elif isinstance(labels, list):
         for label in labels:
             if isinstance(label, dict):
                 for key, value in label.items():
                     if key.startswith('piholedns'):
-                        relevant_labels.append({key: value})
+                        relevant_labels.append((key, value))
             elif '=' in label:
                 key, value = label.split('=', 1)
                 if key.startswith('piholedns'):
-                    relevant_labels.append({key: value})
+                    relevant_labels.append((key, value))
     return relevant_labels
 
 def read_docker_compose_labels(file_path):
@@ -38,15 +38,36 @@ def read_docker_compose_labels(file_path):
         logging.error(f"Error reading Docker Compose file: {e}")
         return []
 
-def append_to_file(file_path, data, host_ip):
+def update_file(file_path, data, host_ip):
     try:
-        with open(file_path, 'a') as file:
-            for label in data:
-                for key, value in label.items():
-                    file.write(f"{host_ip} {key}: {value}\n")
-        logging.info(f"Successfully appended labels to {file_path}")
+        # Read existing content and update if necessary
+        updated_content = []
+        with open(file_path, 'r') as file:
+            existing_lines = file.readlines()
+            existing_labels = {line.split()[1]: line for line in existing_lines if line.startswith(host_ip)}
+
+            for key, value in data:
+                label_line = f"{host_ip} {key}: {value}\n"
+                if key in existing_labels:
+                    if existing_labels[key] != label_line:
+                        updated_content.append(label_line)
+                    else:
+                        updated_content.append(existing_labels[key])
+                else:
+                    updated_content.append(label_line)
+
+        # Write updated content
+        with open(file_path, 'w') as file:
+            file.writelines(updated_content)
+
+        logging.info(f"Successfully updated {file_path}")
+    except FileNotFoundError:
+        with open(file_path, 'w') as file:  # Create file if it doesn't exist
+            for key, value in data:
+                file.write(f"{host_ip} {value}\n")
+        logging.info(f"Created and updated {file_path}")
     except Exception as e:
-        logging.error(f"Error writing to file: {e}")
+        logging.error(f"Error updating file: {e}")
 
 def main():
     compose_file = '/compose/docker-compose.yml'
@@ -55,7 +76,7 @@ def main():
 
     labels = read_docker_compose_labels(compose_file)
     if labels:
-        append_to_file(output_file, labels, host_ip)
+        update_file(output_file, labels, host_ip)
     else:
         logging.info("No labels found or error occurred while reading labels.")
 
