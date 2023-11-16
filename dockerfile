@@ -3,7 +3,7 @@ FROM python:3.8
 
 # Install any necessary dependencies
 # For example, you might need Docker SDK for Python
-RUN pip install watchdog pyyaml
+RUN pip install watchdog pyyaml ipaddress
 
 # Copy your script into the container
 COPY main.py /main.py

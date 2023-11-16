@@ -55,31 +55,44 @@ def update_output_file(output_path, intermediary_path):
     try:
         with open(intermediary_path, 'r') as file:
             intermediary_data = json.load(file)
+
         with open(output_path, 'r') as file:
             existing_lines = set(file.read().splitlines())
 
-        new_pairs = {data.get('pair') for data in intermediary_data.values() if data.get('pair')}
-        
         for container, data in intermediary_data.items():
+            new_pair = data.get('pair')
             old_pair = data.get('old_pair')
-            if old_pair and old_pair in existing_lines and old_pair != data.get('pair'):
-                existing_lines.remove(old_pair)
-                logging.info(f"Removed old pair for container {container}: {old_pair}")
 
-        updated_lines = existing_lines.union(new_pairs)
+            # Extract DNS name from the pair for comparison
+            new_dns = new_pair.split(' ')[1] if new_pair else ''
+            old_dns = old_pair.split(' ')[1] if old_pair else ''
+
+            # Check if the DNS name already exists with a different IP
+            conflicting_entry = any(line.split(' ')[1] == new_dns and line != old_pair for line in existing_lines)
+            if conflicting_entry:
+                logging.warning(f"Conflicting entry found for DNS {new_dns}. Not updating.")
+                continue
+
+            # Update existing_lines with the new pair
+            if old_pair:
+                existing_lines.discard(old_pair)
+            if new_pair:
+                existing_lines.add(new_pair)
 
         with open(output_path, 'w') as file:
-            for line in sorted(updated_lines):
+            for line in sorted(existing_lines):
                 file.write(f"{line}\n")
 
         logging.info(f"Successfully updated {output_path}")
+
     except FileNotFoundError:
         with open(output_path, 'w') as file:
-            for pair in new_pairs:
-                file.write(f"{pair}\n")
-        logging.info(f"Created and populated new {output_path}")
+            for line in existing_lines:
+                file.write(f"{line}\n")
+            logging.info(f"Created and populated new {output_path}")
     except Exception as e:
         logging.error(f"Error updating file: {e}")
+
 
 def watch_for_changes(filename, interval=5):
     last_modified = None
