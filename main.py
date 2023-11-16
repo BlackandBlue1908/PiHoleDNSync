@@ -3,6 +3,9 @@ import yaml
 import logging
 import json
 import time
+import threading
+from watchdog.observers import Observer
+from watchdog.events import FileSystemEventHandler
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -94,21 +97,73 @@ def watch_for_changes(filename, interval=5):
             yield False
         time.sleep(interval)
 
+def process_files(compose_file, intermediary_file, output_file):
+    current_labels = read_docker_compose_labels(compose_file)
+    previous_labels = read_intermediary_file(intermediary_file)
+
+    update_intermediary_file(intermediary_file, current_labels, previous_labels)
+    update_output_file(output_file, intermediary_file)
+
+    logging.info("Processing completed.")
+
+class DockerComposeFileEventHandler(FileSystemEventHandler):
+    def __init__(self, compose_file, intermediary_file, output_file):
+        self.compose_file = compose_file
+        self.intermediary_file = intermediary_file
+        self.output_file = output_file
+
+    def on_any_event(self, event):
+        # React only to file creation/modification in the directory of the Docker Compose file
+        if event.is_directory or not event.event_type in ['created', 'modified']:
+            return
+
+        file_dir = os.path.dirname(event.src_path)
+        if file_dir == os.path.dirname(self.compose_file):
+            logging.info(f"Change detected in the directory of {self.compose_file}, reprocessing...")
+            process_files(self.compose_file, self.intermediary_file, self.output_file)
+
+def timed_run(interval, compose_file, intermediary_file, output_file):
+    while True:
+        try:
+            logging.info("Starting timed processing cycle.")
+            process_files(compose_file, intermediary_file, output_file)
+            logging.info(f"Sleeping for {interval} seconds.")
+            time.sleep(interval)
+        except Exception as e:
+            logging.error(f"Error in timed run: {e}")
+            # Optional: Decide if you want to break the loop in case of an error
+            # break
+
 def main():
     compose_file = '/compose/docker-compose.yml'
-    output_file = '/output/your-output-file.txt'
-    intermediary_file = '/output/intermediary.json'
+    output_file = '/output/custom.list'
+    intermediary_file = '/data/tempdns.json'
 
-    for file_changed in watch_for_changes(compose_file):
-        if file_changed:
-            logging.info(f"{compose_file} has changed, processing...")
-            current_labels = read_docker_compose_labels(compose_file)
-            previous_labels = read_intermediary_file(intermediary_file)
+    watch_mode = os.getenv('WATCH_MODE', 'False').lower() == 'true'
+    timed_mode = os.getenv('TIMED_MODE', 'False').lower() == 'true'
+    poll_interval = int(os.getenv('POLL_INTERVAL', 30))
 
-            update_intermediary_file(intermediary_file, current_labels, previous_labels)
-            update_output_file(output_file, intermediary_file)
 
-            logging.info("Processing completed.")
+    logging.info(f"Watch Mode: {watch_mode}, Timed Mode: {timed_mode}, Poll Interval: {poll_interval} seconds.")
+
+    if watch_mode:
+        event_handler = DockerComposeFileEventHandler(compose_file, intermediary_file, output_file)
+        observer = Observer()
+        observer.schedule(event_handler, path=os.path.dirname(compose_file), recursive=False)
+        observer.start()
+
+    if timed_mode:
+        timed_thread = threading.Thread(target=timed_run, args=(poll_interval, compose_file, intermediary_file, output_file))
+        timed_thread.daemon = True  # Set this to False if you want the script to wait for this thread to complete
+        timed_thread.start()
+
+    try:
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        if watch_mode:
+            observer.stop()
+            observer.join()
 
 if __name__ == "__main__":
     main()
