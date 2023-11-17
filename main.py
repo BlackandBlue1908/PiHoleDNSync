@@ -120,20 +120,27 @@ def process_files(compose_file, intermediary_file, output_file):
     logging.info("Processing completed.")
 
 class DockerComposeFileEventHandler(FileSystemEventHandler):
-    def __init__(self, compose_file, intermediary_file, output_file):
+    def __init__(self, compose_file, intermediary_file, output_file, debounce_time=5):
         self.compose_file = compose_file
         self.intermediary_file = intermediary_file
         self.output_file = output_file
+        self.debounce_time = debounce_time
+        self.timer = None
 
     def on_any_event(self, event):
-        # React only to file creation/modification in the directory of the Docker Compose file
         if event.is_directory or not event.event_type in ['created', 'modified']:
             return
 
         file_dir = os.path.dirname(event.src_path)
         if file_dir == os.path.dirname(self.compose_file):
-            logging.info(f"Change detected in the directory of {self.compose_file}, reprocessing...")
-            process_files(self.compose_file, self.intermediary_file, self.output_file)
+            if self.timer is not None and self.timer.is_alive():
+                self.timer.cancel()
+            self.timer = threading.Timer(self.debounce_time, self.process_event)
+            self.timer.start()
+
+    def process_event(self):
+        logging.info(f"Change detected in the directory of {self.compose_file}, reprocessing after debounce period...")
+        process_files(self.compose_file, self.intermediary_file, self.output_file)
 
 def timed_run(interval, compose_file, intermediary_file, output_file):
     while True:
