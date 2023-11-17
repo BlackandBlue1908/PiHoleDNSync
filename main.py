@@ -11,8 +11,30 @@ from watchdog.events import FileSystemEventHandler
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 def process_labels(labels):
-    return {key: value for key, value in (labels.items() if isinstance(labels, dict) else 
-            (item.split('=', 1) for item in labels if '=' in item)) if key in ['pihole.dns', 'pihole.hostip']}
+    processed = {}
+    for key, value in (labels.items() if isinstance(labels, dict) else 
+            (item.split('=', 1) for item in labels if '=' in item)):
+        if key == 'pihole.dns':
+            try:
+                dns_values = parse_dns_values(value)
+                processed[key] = dns_values
+            except Exception as e:
+                logging.error(f"Error processing DNS values: {e}")
+                processed[key] = ()
+        elif key == 'pihole.hostip':
+            processed[key] = value
+    return processed
+
+
+def parse_dns_values(dns_string):
+    # Trim leading and trailing characters ('(' and ')')
+    dns_string = dns_string.strip("()")
+
+    # Split the string by comma and strip extra whitespace and quotes
+    dns_values = [value.strip(" '\"") for value in dns_string.split(',')]
+
+    return tuple(dns_values)
+
 
 def read_docker_compose_labels(file_path):
     try:
@@ -37,11 +59,17 @@ def read_intermediary_file(intermediary_path):
 def update_intermediary_file(intermediary_path, current_data, previous_data):
     updated = False
     for container, labels in current_data.items():
-        new_pair = f"{labels.get('pihole.hostip', 'unknown')} {labels.get('pihole.dns', 'unknown')}"
-        old_pair = previous_data.get(container, {}).get('pair', 'unknown unknown')
-        if new_pair != old_pair:
-            previous_data[container] = {'pair': new_pair, 'old_pair': old_pair}
-            updated = True
+        host_ip = labels.get('pihole.hostip', 'unknown')
+        dns_values = labels.get('pihole.dns', ())
+
+        for dns in dns_values:
+            new_pair = f"{host_ip} {dns}"
+            old_pair = previous_data.get(container, {}).get(dns, 'unknown unknown')
+            if new_pair != old_pair:
+                if container not in previous_data:
+                    previous_data[container] = {}
+                previous_data[container][dns] = {'pair': new_pair, 'old_pair': old_pair}
+                updated = True
 
     if updated:
         try:
@@ -50,6 +78,7 @@ def update_intermediary_file(intermediary_path, current_data, previous_data):
             logging.info(f"Updated intermediary file {intermediary_path}")
         except Exception as e:
             logging.error(f"Error updating intermediary file: {e}")
+
 
 def update_output_file(output_path, intermediary_path):
     try:
