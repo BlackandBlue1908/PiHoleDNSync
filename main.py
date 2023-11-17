@@ -64,11 +64,11 @@ def update_intermediary_file(intermediary_path, current_data, previous_data):
 
         for dns in dns_values:
             new_pair = f"{host_ip} {dns}"
-            old_pair = previous_data.get(container, {}).get(dns, 'unknown unknown')
+            # Use a combination of container name and DNS as the key
+            unique_key = f"{container}_{dns}"
+            old_pair = previous_data.get(unique_key, 'unknown unknown')
             if new_pair != old_pair:
-                if container not in previous_data:
-                    previous_data[container] = {}
-                previous_data[container][dns] = {'pair': new_pair, 'old_pair': old_pair}
+                previous_data[unique_key] = {'pair': new_pair, 'old_pair': old_pair}
                 updated = True
 
     if updated:
@@ -78,6 +78,7 @@ def update_intermediary_file(intermediary_path, current_data, previous_data):
             logging.info(f"Updated intermediary file {intermediary_path}")
         except Exception as e:
             logging.error(f"Error updating intermediary file: {e}")
+
 
 
 def update_output_file(output_path, intermediary_path):
