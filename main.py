@@ -11,41 +11,18 @@ from watchdog.events import FileSystemEventHandler
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 def process_labels(labels):
-    logging.info(f"All labels: {labels}")
-    processed = {}
-    for key, value in labels.items():
-        if key.startswith('pihole.dns'):
-            suffix = key.split('.')[-1] if '.' in key else 'default'
-            dns_values = parse_dns_values(value)
-            hostip_key = 'pihole.hostip' + ('.' + suffix if suffix != 'default' else '')
-            hostip_value = labels.get(hostip_key, 'unknown')
-            processed[suffix] = {'dns': dns_values, 'hostip': hostip_value}
-    logging.info(f"Process Labels - {processed}")
-    return processed
-
-
-def parse_dns_values(dns_string):
-    # Trim leading and trailing characters ('(' and ')')
-    dns_string = dns_string.strip("()")
-
-    # Split the string by comma and strip extra whitespace and quotes
-    dns_values = [value.strip(" '\"") for value in dns_string.split(',')]
-    logging.info(f"Parse DNS Results - {dns}")
-    return tuple(dns_values)
-
+    return {key: value for key, value in (labels.items() if isinstance(labels, dict) else 
+            (item.split('=', 1) for item in labels if '=' in item)) if key in ['pihole.dns', 'pihole.hostip']}
 
 def read_docker_compose_labels(file_path):
     try:
         with open(file_path, 'r') as file:
             compose_data = yaml.safe_load(file)
-            services_data = {service_name: service.get('labels', {}) 
-                             for service_name, service in compose_data['services'].items()}
-            logging.info(f"Services data: {services_data}")
-            return services_data
+            return {service_name: process_labels(service.get('labels', {}))
+                    for service_name, service in compose_data['services'].items()}
     except Exception as e:
         logging.error(f"Error reading Docker Compose file: {e}")
         return {}
-
 
 def read_intermediary_file(intermediary_path):
     try:
@@ -59,17 +36,12 @@ def read_intermediary_file(intermediary_path):
 
 def update_intermediary_file(intermediary_path, current_data, previous_data):
     updated = False
-    for suffix, label_data in current_data.items():
-        dns_values = label_data['dns']
-        host_ip = label_data['hostip']
-
-        for dns in dns_values:
-            new_pair = f"{host_ip} {dns}"
-            unique_key = f"{suffix}_{dns}"
-            old_pair = previous_data.get(unique_key, 'unknown unknown')
-            if new_pair != old_pair:
-                previous_data[unique_key] = {'pair': new_pair, 'old_pair': old_pair}
-                updated = True
+    for container, labels in current_data.items():
+        new_pair = f"{labels.get('pihole.hostip', 'unknown')} {labels.get('pihole.dns', 'unknown')}"
+        old_pair = previous_data.get(container, {}).get('pair', 'unknown unknown')
+        if new_pair != old_pair:
+            previous_data[container] = {'pair': new_pair, 'old_pair': old_pair}
+            updated = True
 
     if updated:
         try:
@@ -79,7 +51,6 @@ def update_intermediary_file(intermediary_path, current_data, previous_data):
         except Exception as e:
             logging.error(f"Error updating intermediary file: {e}")
 
-
 def update_output_file(output_path, intermediary_path):
     try:
         with open(intermediary_path, 'r') as file:
@@ -88,18 +59,21 @@ def update_output_file(output_path, intermediary_path):
         with open(output_path, 'r') as file:
             existing_lines = set(file.read().splitlines())
 
-        for suffix, data in intermediary_data.items():
+        for container, data in intermediary_data.items():
             new_pair = data.get('pair')
             old_pair = data.get('old_pair')
 
+            # Extract DNS name from the pair for comparison
             new_dns = new_pair.split(' ')[1] if new_pair else ''
             old_dns = old_pair.split(' ')[1] if old_pair else ''
 
+            # Check if the DNS name already exists with a different IP
             conflicting_entry = any(line.split(' ')[1] == new_dns and line != old_pair for line in existing_lines)
             if conflicting_entry:
                 logging.warning(f"Conflicting entry found for DNS {new_dns}. Not updating.")
                 continue
 
+            # Update existing_lines with the new pair
             if old_pair:
                 existing_lines.discard(old_pair)
             if new_pair:
@@ -113,13 +87,11 @@ def update_output_file(output_path, intermediary_path):
 
     except FileNotFoundError:
         with open(output_path, 'w') as file:
-            for line in sorted(existing_lines):
+            for line in existing_lines:
                 file.write(f"{line}\n")
             logging.info(f"Created and populated new {output_path}")
-
     except Exception as e:
         logging.error(f"Error updating file: {e}")
-
 
 
 def watch_for_changes(filename, interval=5):
@@ -139,7 +111,6 @@ def watch_for_changes(filename, interval=5):
         time.sleep(interval)
 
 def process_files(compose_file, intermediary_file, output_file):
-    logging.info(f"Reading Docker Compose file: {compose_file}")
     current_labels = read_docker_compose_labels(compose_file)
     previous_labels = read_intermediary_file(intermediary_file)
 
