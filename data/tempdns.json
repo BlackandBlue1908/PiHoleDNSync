@@ -1,1 +1,1 @@
-{"piholednsync": {"pair": "10.0.0.222 pi.test5.com", "old_pair": "unknown unknown"}, "whoami": {"pair": "192.168.1.1 dns1.example.com", "old_pair": "unknown unknown"}}
+{"piholednsync": {"pairs": ["10.0.0.222 tools.nas.lan"], "old_pairs": []}, "whoami": {"pairs": [], "old_pairs": ["192.111.1.1 dns1.ff.com"]}, "whoami2": {"pairs": [], "old_pairs": ["1.1.1.2 dns2.ff.com"]}}

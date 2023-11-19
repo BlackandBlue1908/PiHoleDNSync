@@ -11,8 +11,14 @@ from watchdog.events import FileSystemEventHandler
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 def process_labels(labels):
-    return {key: value for key, value in (labels.items() if isinstance(labels, dict) else 
-            (item.split('=', 1) for item in labels if '=' in item)) if key in ['pihole.dns', 'pihole.hostip']}
+    processed_labels = {}
+    for key, value in (labels.items() if isinstance(labels, dict) else 
+                       (item.split('=', 1) for item in labels if '=' in item)):
+        if key == 'pihole.dns':
+            processed_labels[key] = value.split(',')  # Split DNS names by comma
+        elif key == 'pihole.hostip':
+            processed_labels[key] = value
+    return processed_labels
 
 def read_docker_compose_labels(file_path):
     try:
@@ -37,10 +43,12 @@ def read_intermediary_file(intermediary_path):
 def update_intermediary_file(intermediary_path, current_data, previous_data):
     updated = False
     for container, labels in current_data.items():
-        new_pair = f"{labels.get('pihole.hostip', 'unknown')} {labels.get('pihole.dns', 'unknown')}"
-        old_pair = previous_data.get(container, {}).get('pair', 'unknown unknown')
-        if new_pair != old_pair:
-            previous_data[container] = {'pair': new_pair, 'old_pair': old_pair}
+        dns_names = labels.get('pihole.dns', ['unknown'])
+        host_ip = labels.get('pihole.hostip', 'unknown')
+        new_pairs = [f"{host_ip} {dns}" for dns in dns_names]
+        old_pairs = previous_data.get(container, {}).get('pairs', ['unknown unknown'])
+        if set(new_pairs) != set(old_pairs):
+            previous_data[container] = {'pairs': new_pairs, 'old_pairs': old_pairs}
             updated = True
 
     if updated:
@@ -56,29 +64,28 @@ def update_output_file(output_path, intermediary_path):
         with open(intermediary_path, 'r') as file:
             intermediary_data = json.load(file)
 
+        # Read existing lines from the output file
         with open(output_path, 'r') as file:
             existing_lines = set(file.read().splitlines())
 
+        # Update existing_lines based on intermediary data
         for container, data in intermediary_data.items():
-            new_pair = data.get('pair')
-            old_pair = data.get('old_pair')
+            new_pairs = set(data.get('pairs', []))
+            old_pairs = set(data.get('old_pairs', []))
 
-            # Extract DNS name from the pair for comparison
-            new_dns = new_pair.split(' ')[1] if new_pair else ''
-            old_dns = old_pair.split(' ')[1] if old_pair else ''
+            # Remove old pairs
+            existing_lines.difference_update(old_pairs)
 
-            # Check if the DNS name already exists with a different IP
-            conflicting_entry = any(line.split(' ')[1] == new_dns and line != old_pair for line in existing_lines)
-            if conflicting_entry:
-                logging.warning(f"Conflicting entry found for DNS {new_dns}. Not updating.")
-                continue
+            # Add new pairs, checking for conflicts
+            for new_pair in new_pairs:
+                new_dns = new_pair.split(' ')[1]
+                conflicting_entry = any(line.split(' ')[1] == new_dns and line not in new_pairs for line in existing_lines)
+                if conflicting_entry:
+                    logging.warning(f"Conflicting entry found for DNS {new_dns}. Not updating.")
+                else:
+                    existing_lines.add(new_pair)
 
-            # Update existing_lines with the new pair
-            if old_pair:
-                existing_lines.discard(old_pair)
-            if new_pair:
-                existing_lines.add(new_pair)
-
+        # Write updated lines to the output file
         with open(output_path, 'w') as file:
             for line in sorted(existing_lines):
                 file.write(f"{line}\n")
@@ -86,8 +93,9 @@ def update_output_file(output_path, intermediary_path):
         logging.info(f"Successfully updated {output_path}")
 
     except FileNotFoundError:
+        # Create the file if it doesn't exist and write the new data
         with open(output_path, 'w') as file:
-            for line in existing_lines:
+            for line in sorted(existing_lines):
                 file.write(f"{line}\n")
             logging.info(f"Created and populated new {output_path}")
     except Exception as e:
