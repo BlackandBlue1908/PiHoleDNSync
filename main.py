@@ -15,22 +15,23 @@ def process_labels(labels):
     for key, value in (labels.items() if isinstance(labels, dict) else 
                        (item.split('=', 1) for item in labels if '=' in item)):
         if key == 'pihole.dns':
-            processed_labels['pihole.dns'].extend(value.split(','))
+            # Handle multiple domain names in pihole.dns
+            domains = [domain.strip('` ,') for domain in value.split(',') if domain.strip()]
+            processed_labels['pihole.dns'].extend(domains)
         elif key.startswith('traefik.http.routers.') and key.endswith('.rule'):
-            # Extract domain from Traefik rule
-            if '`' in value:
-                # Format: Host(`example.com`)
-                domain = value.split('`')[1]
-                processed_labels['traefik.dns'].append(domain)
-            else:
-                # Log an unrecognized format
-                logging.warning(f"Unrecognized Traefik rule format: {value}")
+            # Extract domains from Traefik rule
+            if 'Host(' in value:
+                value = value.split('Host(')[-1].rstrip(')')
+                domains = [domain.strip('` ,') for domain in value.split(',') if domain.strip()]
+                processed_labels['traefik.dns'].extend(domains)
         elif key == 'pihole.hostip':
             processed_labels['pihole.hostip'] = value
 
     # Log the processed labels for debugging
     logging.info(f"Processed labels: {processed_labels}")
     return processed_labels
+
+
 
 
 def read_docker_compose_labels(file_path):
