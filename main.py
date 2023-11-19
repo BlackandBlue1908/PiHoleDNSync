@@ -11,14 +11,27 @@ from watchdog.events import FileSystemEventHandler
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 def process_labels(labels):
-    processed_labels = {}
+    processed_labels = {'pihole.dns': [], 'traefik.dns': []}
     for key, value in (labels.items() if isinstance(labels, dict) else 
                        (item.split('=', 1) for item in labels if '=' in item)):
         if key == 'pihole.dns':
-            processed_labels[key] = value.split(',')  # Split DNS names by comma
+            processed_labels['pihole.dns'].extend(value.split(','))
+        elif key.startswith('traefik.http.routers.') and key.endswith('.rule'):
+            # Extract domain from Traefik rule
+            if '`' in value:
+                # Format: Host(`example.com`)
+                domain = value.split('`')[1]
+                processed_labels['traefik.dns'].append(domain)
+            else:
+                # Log an unrecognized format
+                logging.warning(f"Unrecognized Traefik rule format: {value}")
         elif key == 'pihole.hostip':
-            processed_labels[key] = value
+            processed_labels['pihole.hostip'] = value
+
+    # Log the processed labels for debugging
+    logging.info(f"Processed labels: {processed_labels}")
     return processed_labels
+
 
 def read_docker_compose_labels(file_path):
     try:
@@ -43,7 +56,8 @@ def read_intermediary_file(intermediary_path):
 def update_intermediary_file(intermediary_path, current_data, previous_data):
     updated = False
     for container, labels in current_data.items():
-        dns_names = labels.get('pihole.dns', ['unknown'])
+        # Combine pihole.dns and traefik.dns entries
+        dns_names = labels.get('pihole.dns', []) + labels.get('traefik.dns', [])
         host_ip = labels.get('pihole.hostip', 'unknown')
         new_pairs = [f"{host_ip} {dns}" for dns in dns_names]
         old_pairs = previous_data.get(container, {}).get('pairs', ['unknown unknown'])
@@ -58,6 +72,7 @@ def update_intermediary_file(intermediary_path, current_data, previous_data):
             logging.info(f"Updated intermediary file {intermediary_path}")
         except Exception as e:
             logging.error(f"Error updating intermediary file: {e}")
+
 
 def update_output_file(output_path, intermediary_path):
     try:
