@@ -1,12 +1,17 @@
-# Use a base image like Python if you plan to write your script in Python
-FROM python:3.8
+# Use a slim version of the Python image for a smaller footprint
+FROM python:3.8-slim
 
-# Install any necessary dependencies
-# For example, you might need Docker SDK for Python
-RUN pip install watchdog pyyaml ipaddress
+# Set a working directory in the container
+WORKDIR /app
+
+# Copy the requirements file first to leverage Docker cache
+COPY requirements.txt /app/
+
+# Install only the necessary Python packages
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy your script into the container
-COPY main.py /main.py
+COPY main.py /app/
 
 # Set the entry point of the container to your script
-ENTRYPOINT ["python", "/main.py"]
+ENTRYPOINT ["python", "main.py"]

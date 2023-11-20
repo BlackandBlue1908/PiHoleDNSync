@@ -170,7 +170,7 @@ def timed_run(interval, compose_file, intermediary_file, output_file):
             logging.info("Starting timed processing cycle.")
             process_files(compose_file, intermediary_file, output_file)
             logging.info(f"Sleeping for {interval} seconds.")
-            time.sleep(interval)
+            time.sleep(inter val)
         except Exception as e:
             logging.error(f"Error in timed run: {e}")
             # Optional: Decide if you want to break the loop in case of an error
@@ -200,6 +200,7 @@ def main():
         timed_thread.start()
 
     try:
+        
         while True:
             time.sleep(1)
     except KeyboardInterrupt:
