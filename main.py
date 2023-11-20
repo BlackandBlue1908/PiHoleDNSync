@@ -10,7 +10,7 @@ from watchdog.events import FileSystemEventHandler
 # Configure logging.,
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-def process_labels(labels):
+def process_labels(labels, process_traefik):
     processed_labels = {'pihole.dns': [], 'traefik.dns': []}
     for key, value in (labels.items() if isinstance(labels, dict) else 
                        (item.split('=', 1) for item in labels if '=' in item)):
@@ -19,7 +19,7 @@ def process_labels(labels):
             value = value.strip('\'" ')
             domains = [domain.strip('` ,') for domain in value.split(',') if domain.strip()]
             processed_labels['pihole.dns'].extend(domains)
-        elif key.startswith('traefik.http.routers.') and key.endswith('.rule'):
+        elif process_traefik==True and key.startswith('traefik.http.routers.') and key.endswith('.rule'):
             # Extract domains from Traefik rule with possible multiple Host directives
             host_directives = value.split('||')
             for directive in host_directives:
@@ -34,20 +34,16 @@ def process_labels(labels):
     logging.info(f"Processed labels: {processed_labels}")
     return processed_labels
 
-
-
-
-
-
-def read_docker_compose_labels(file_path):
+def read_docker_compose_labels(file_path, process_traefik):
     try:
         with open(file_path, 'r') as file:
             compose_data = yaml.safe_load(file)
-            return {service_name: process_labels(service.get('labels', {}))
+            return {service_name: process_labels(service.get('labels', {}), process_traefik)
                     for service_name, service in compose_data['services'].items()}
     except Exception as e:
         logging.error(f"Error reading Docker Compose file: {e}")
         return {}
+
 
 def read_intermediary_file(intermediary_path):
     try:
@@ -139,8 +135,8 @@ def watch_for_changes(filename, interval=5):
             yield False
         time.sleep(interval)
 
-def process_files(compose_file, intermediary_file, output_file):
-    current_labels = read_docker_compose_labels(compose_file)
+def process_files(compose_file, intermediary_file, output_file, process_traefik):
+    current_labels = read_docker_compose_labels(compose_file, process_traefik)
     previous_labels = read_intermediary_file(intermediary_file)
 
     update_intermediary_file(intermediary_file, current_labels, previous_labels)
@@ -148,11 +144,13 @@ def process_files(compose_file, intermediary_file, output_file):
 
     logging.info("Processing completed.")
 
+
 class DockerComposeFileEventHandler(FileSystemEventHandler):
-    def __init__(self, compose_file, intermediary_file, output_file):
+    def __init__(self, compose_file, intermediary_file, output_file, process_traefik):
         self.compose_file = compose_file
         self.intermediary_file = intermediary_file
         self.output_file = output_file
+        self.process_traefik = process_traefik
 
     def on_any_event(self, event):
         # React only to file creation/modification in the directory of the Docker Compose file
@@ -162,19 +160,20 @@ class DockerComposeFileEventHandler(FileSystemEventHandler):
         file_dir = os.path.dirname(event.src_path)
         if file_dir == os.path.dirname(self.compose_file):
             logging.info(f"Change detected in the directory of {self.compose_file}, reprocessing...")
-            process_files(self.compose_file, self.intermediary_file, self.output_file)
+            process_files(self.compose_file, self.intermediary_file, self.output_file, self.process_traefik)
 
-def timed_run(interval, compose_file, intermediary_file, output_file):
+def timed_run(interval, compose_file, intermediary_file, output_file, process_traefik):
     while True:
         try:
             logging.info("Starting timed processing cycle.")
-            process_files(compose_file, intermediary_file, output_file)
+            process_files(compose_file, intermediary_file, output_file, process_traefik)
             logging.info(f"Sleeping for {interval} seconds.")
-            time.sleep(inter val)
+            time.sleep(interval)  # Corrected this line
         except Exception as e:
             logging.error(f"Error in timed run: {e}")
             # Optional: Decide if you want to break the loop in case of an error
             # break
+
 
 def main():
     compose_file = '/compose/docker-compose.yml'
@@ -184,23 +183,22 @@ def main():
     watch_mode = os.getenv('WATCH_MODE', 'False').lower() == 'true'
     timed_mode = os.getenv('TIMED_MODE', 'False').lower() == 'true'
     poll_interval = int(os.getenv('POLL_INTERVAL', 30))
+    process_traefik = os.getenv('PROCESS_TRAEFIK', 'False').lower() == 'true'
 
-
-    logging.info(f"Watch Mode: {watch_mode}, Timed Mode: {timed_mode}, Poll Interval: {poll_interval} seconds.")
+    logging.info(f"Watch Mode: {watch_mode}, Timed Mode: {timed_mode}, Poll Interval: {poll_interval} seconds, Process Traefik: {process_traefik}")
 
     if watch_mode:
-        event_handler = DockerComposeFileEventHandler(compose_file, intermediary_file, output_file)
+        event_handler = DockerComposeFileEventHandler(compose_file, intermediary_file, output_file, process_traefik)
         observer = Observer()
         observer.schedule(event_handler, path=os.path.dirname(compose_file), recursive=False)
         observer.start()
 
     if timed_mode:
-        timed_thread = threading.Thread(target=timed_run, args=(poll_interval, compose_file, intermediary_file, output_file))
-        timed_thread.daemon = True  # Set this to False if you want the script to wait for this thread to complete
+        timed_thread = threading.Thread(target=timed_run, args=(poll_interval, compose_file, intermediary_file, output_file, process_traefik))
+        timed_thread.daemon = True
         timed_thread.start()
 
     try:
-        
         while True:
             time.sleep(1)
     except KeyboardInterrupt:
