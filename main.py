@@ -6,12 +6,20 @@ import time
 import threading
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
+# Global variable for default host IP
+DEFAULT_HOST_IP = '1.1.1.1'
+
+# ... rest of the imports and code ...
+
 
 # Configure logging.,
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 def process_labels(labels, process_traefik):
+    global DEFAULT_HOST_IP
     processed_labels = {'pihole.dns': [], 'traefik.dns': []}
+    host_ip = labels.get('pihole.hostip', DEFAULT_HOST_IP)
+
     for key, value in (labels.items() if isinstance(labels, dict) else 
                        (item.split('=', 1) for item in labels if '=' in item)):
         if key == 'pihole.dns':
@@ -19,7 +27,7 @@ def process_labels(labels, process_traefik):
             value = value.strip('\'" ')
             domains = [domain.strip('` ,') for domain in value.split(',') if domain.strip()]
             processed_labels['pihole.dns'].extend(domains)
-        elif process_traefik==True and key.startswith('traefik.http.routers.') and key.endswith('.rule'):
+        elif process_traefik and key.startswith('traefik.http.routers.') and key.endswith('.rule'):
             # Extract domains from Traefik rule with possible multiple Host directives
             host_directives = value.split('||')
             for directive in host_directives:
@@ -27,8 +35,8 @@ def process_labels(labels, process_traefik):
                     directive = directive.split('Host(')[-1].rstrip(')\'" ')
                     domains = [domain.strip('` ,') for domain in directive.split(',') if domain.strip()]
                     processed_labels['traefik.dns'].extend(domains)
-        elif key == 'pihole.hostip':
-            processed_labels['pihole.hostip'] = value.strip('\'" ')
+
+    processed_labels['pihole.hostip'] = host_ip
 
     # Log the processed labels for debugging
     logging.info(f"Processed labels: {processed_labels}")
@@ -38,11 +46,20 @@ def read_docker_compose_labels(file_path, process_traefik):
     try:
         with open(file_path, 'r') as file:
             compose_data = yaml.safe_load(file)
-            return {service_name: process_labels(service.get('labels', {}), process_traefik)
-                    for service_name, service in compose_data['services'].items()}
+
+        services = compose_data.get('services', {})
+        labels_data = {}
+        for service_name, service in services.items():
+            labels = service.get('labels', {})
+            if isinstance(labels, list):
+                # Convert list of 'key=value' to dictionary
+                labels = dict(label.split('=', 1) for label in labels if '=' in label)
+            labels_data[service_name] = process_labels(labels, process_traefik)
+        return labels_data
     except Exception as e:
         logging.error(f"Error reading Docker Compose file: {e}")
         return {}
+
 
 
 def read_intermediary_file(intermediary_path):
@@ -176,10 +193,14 @@ def timed_run(interval, compose_file, intermediary_file, output_file, process_tr
 
 
 def main():
+    global DEFAULT_HOST_IP
+    DEFAULT_HOST_IP = os.getenv('DEFAULT_HOST_IP', 'unknown')
+
+    # ... rest of the main function ...
+
     compose_file = '/compose/docker-compose.yml'
     output_file = '/output/custom.list'
     intermediary_file = '/data/tempdns.json'
-
     watch_mode = os.getenv('WATCH_MODE', 'False').lower() == 'true'
     timed_mode = os.getenv('TIMED_MODE', 'False').lower() == 'true'
     poll_interval = int(os.getenv('POLL_INTERVAL', 30))
