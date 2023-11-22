@@ -6,6 +6,7 @@ import time
 import threading
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
+import sys
 # Global variable for default host IP
 DEFAULT_HOST_IP = '1.1.1.1'
 
@@ -192,6 +193,11 @@ def timed_run(interval, compose_file, intermediary_file, output_file, process_tr
             # break
 
 
+def manual_execution(compose_file, intermediary_file, output_file, process_traefik):
+    logging.info("Manual execution started.")
+    process_files(compose_file, intermediary_file, output_file, process_traefik)
+    logging.info("Manual execution completed.")
+
 def main():
     global DEFAULT_HOST_IP
     DEFAULT_HOST_IP = os.getenv('DEFAULT_HOST_IP', 'unknown')
@@ -205,8 +211,13 @@ def main():
     timed_mode = os.getenv('TIMED_MODE', 'False').lower() == 'true'
     poll_interval = int(os.getenv('POLL_INTERVAL', 30))
     process_traefik = os.getenv('PROCESS_TRAEFIK', 'False').lower() == 'true'
-
+    manual_mode = os.getenv('MANUAL_MODE', 'False').lower() == 'true'
+    
     logging.info(f"Watch Mode: {watch_mode}, Timed Mode: {timed_mode}, Poll Interval: {poll_interval} seconds, Process Traefik: {process_traefik}")
+
+    
+    if manual_mode or 'manual' in sys.argv:
+        manual_execution(compose_file, intermediary_file, output_file, process_traefik)
 
     if watch_mode:
         event_handler = DockerComposeFileEventHandler(compose_file, intermediary_file, output_file, process_traefik)
