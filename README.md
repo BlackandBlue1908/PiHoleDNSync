@@ -45,3 +45,9 @@ In this example a total of 8 Local DNS Entries will be added to the custom.list 
 - test.local 10.0.0.111
 - sample.sample.lan 10.0.0.111
 - sample.lan 10.0.0.111
+
+You can run the below command at any time to manually run the script to update custom.list
+```
+sudo docker exec piholednssync python main.py manual
+```
+
