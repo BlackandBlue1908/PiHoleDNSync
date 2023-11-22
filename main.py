@@ -28,7 +28,7 @@ def process_labels(labels, process_traefik):
             value = value.strip('\'" ')
             domains = [domain.strip('` ,') for domain in value.split(',') if domain.strip()]
             processed_labels['pihole.dns'].extend(domains)
-        elif process_traefik and key.startswith('traefik.http.routers.') and key.endswith('.rule'):
+        elif process_traefik and (key.startswith('traefik.http.routers.') or key.startswith('traefik.https.routers.')) and key.endswith('.rule'):
             # Extract domains from Traefik rule with possible multiple Host directives
             host_directives = value.split('||')
             for directive in host_directives:
