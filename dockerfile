@@ -15,3 +15,4 @@ COPY main.py /app/
 
 # Set the entry point of the container to your script
 ENTRYPOINT ["python", "main.py"]
+
