@@ -11,7 +11,7 @@ Compose For Container Itself Example:
 ```
   piholednsync:
     image: ghcr.io/blackandblue1908/piholednsync:main
-    container_name: "piholednssync"
+    container_name: "piholednsync"
     volumes:
       - ./:/compose #Directory of docker-compose.yml
       - ./piholednsync/data:/data #Internal App Data
