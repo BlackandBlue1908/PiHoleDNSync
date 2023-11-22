@@ -1,1 +1,1 @@
-{"piholednsync": {"pairs": ["10.0.0.222 pi.test5.com", "10.0.0.222 testing2.com", "10.0.0.222 testing3.com", "10.0.0.222 tools.nas.lan", "10.0.0.222 tools.lan"], "old_pairs": ["unknown unknown"]}, "whoami": {"pairs": ["192.111.1.2 dns1.ff.com"], "old_pairs": ["unknown unknown"]}, "whoami2": {"pairs": ["10.0.0.211 pihole1.example.com", "10.0.0.211 pihole2.example.com", "10.0.0.211 pihole3.example.com", "10.0.0.211 sagasd.vincebalsamo.com", "10.0.0.211 readarr.nas.lan", "10.0.0.211 readaarr.local"], "old_pairs": ["unknown unknown"]}}
+
