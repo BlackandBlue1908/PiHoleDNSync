@@ -1,6 +1,8 @@
 # PiHoleDNSync
 
-This container runs a small script that reads your docker compose file and creates Local DNS entries in PiHole via the custom.list file. You can do this by setting specific labels per container or if you are using Traefil the script can read your traefik http router labels and use the host names provided there. I created this entire thing using ChatGPT and a ton of trial and error. I am not a developer if you have ways to enhance this please feel free to do so but so far it works for me.
+This container runs a small script that reads your docker compose file and creates Local DNS entries in PiHole via the custom.list file. 
+
+You can do this by setting specific labels per container or if you are using Traefil the script can read your traefik http router labels and use the host names provided there. I created this entire thing using ChatGPT and a ton of trial and error. I am not a developer if you have ways to enhance this please feel free to do so but so far it works for me.
 
 
 
